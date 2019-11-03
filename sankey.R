@@ -3,11 +3,8 @@
 ########################################
 
 #### prelims ####
-library(tidyverse)
-library(networkD3)
-library(bipartite)
-
-
+library(tidyverse);library(reshape2)
+library(networkD3);library(bipartite)
 
 ########################################
 #### data ####
@@ -139,4 +136,151 @@ bi.mat.prop<-bi.mat%>%decostand('total')
 bi.trees<-rownames(bi.mat)
 ########################################
 
+# Load energy projection data
+URL <- "https://cdn.rawgit.com/christophergandrud/networkD3/master/JSONdata/energy.json"
+Energy <- jsonlite::fromJSON(URL)
 
+# 2 dataframe - links and nodes
+Energy$links
+Energy$nodes
+
+p <- sankeyNetwork(Links = Energy$links, Nodes = Energy$nodes, Source = "source",
+                   Target = "target", Value = "value", NodeID = "name",
+                   units = "TWh", fontSize = 12, nodeWidth = 30)
+p
+
+# A connection data frame is a list of flows with intensity for each flow
+links <- data.frame(
+  source=c("group_A","group_A", "group_B", "group_C", "group_C", "group_E"), 
+  target=c("group_C","group_D", "group_E", "group_F", "group_G", "group_H"), 
+  value=c(2,3, 2, 3, 1, 3)
+)
+links
+
+# From these flows we need to create a node data frame: it lists every entities involved in the flow
+nodes <- data.frame(
+  name=c(as.character(links$source), 
+         as.character(links$target)) %>% unique()
+)
+nodes
+
+# With networkD3, connection must be provided using id, not using real name like in the links dataframe.. So we need to reformat it.
+links$IDsource <- match(links$source, nodes$name)-1 
+links$IDtarget <- match(links$target, nodes$name)-1
+
+# Make the Network
+p <- sankeyNetwork(Links = links, Nodes = nodes,
+                   Source = "IDsource", Target = "IDtarget",
+                   Value = "value", NodeID = "name", 
+                   sinksRight=FALSE)
+p
+
+###########################################################
+## generate edgelist
+
+bi.feed.long<-bi.mat%>%as.data.frame()%>%
+  rownames_to_column('TREE_genus')%>%
+  melt(variable.name='HERB_ID_SP')%>%
+  filter(value>0)%>%
+  left_join(lep.info)%>%
+  mutate(feed=str_trim(feed), TREE_class=case_when(TREE_genus %in% c('Abies','Picea','Pinus','Tsuga','Thuja','Pseudotsuga','Juniperus', 'Larix') ~ 'Gymnosperm',TRUE ~ 'Angiosperm'))
+bi.feed.long
+
+edge.ph<-bi.feed.long%>%
+  group_by(TREE_class,TREE_genus, feed)%>%
+  summarize(n=sum(value), sp=length(unique(HERB_ID_SP)), fam=length(unique(HERB_family_2019)))
+edge.ph
+
+node.ph<-data.frame(name=c(as.character(edge.ph$TREE_genus), as.character(edge.ph$feed))%>%unique())
+
+edge.ph$source<-match(edge.ph$TREE_genus, node.ph$name)-1
+edge.ph$target<-match(edge.ph$feed, node.ph$name)-1
+
+
+p<-sankeyNetwork(Links = as.data.frame(edge.ph)%>%filter(n>8), Nodes = node.ph,
+              Source = 'source', Target='target', Value = 'sp', NodeID = 'name', sinksRight=FALSE)
+
+p
+
+
+edge.ph%>%filter(n>8)%>%view
+## look at species list for feeding guilds
+bi.feed.long%>%
+  group_by(feed, HERB_family_2019)%>%
+  summarize(sp_n=length(unique(HERB_sp_2019)), sps=paste0(unique(HERB_sp_2019), collapse=', '))%>%View
+
+cat_n<-sum(edge.ph$n)
+cat_n
+
+feed.sp<-bi.feed.long%>%group_by(feed, HERB_sp_2019, TREE_class)%>%
+  summarize(n=sum(value), genera=length(unique(TREE_genus)))%>%
+  filter(n>10)%>%dcast(feed+HERB_sp_2019~TREE_class, value.var='n')%>%
+  mutate(diet = case_when(is.na(Gymnosperm) ~ 'Angiosperm', is.na(Angiosperm) ~ 'Gymnosperm', !is.na(Angiosperm) & !is.na(Gymnosperm) ~ 'both'))
+feed.sp
+
+feed.sp%>%
+  group_by(diet)%>%
+  summarize(sp=length(unique(HERB_sp_2019))) ## 42 crossover species
+
+# how many species of each diet category are in each feeding guild?
+str(feed.sp)
+feed.ga<-feed.sp%>%
+  replace_na(list(Angiosperm=0, Gymnosperm=0))%>%
+  mutate(n=Angiosperm+Gymnosperm)%>%
+  group_by(feed, diet)%>%
+  summarize(n_sum=sum(n, na.rm=TRUE), sp=length(unique(HERB_sp_2019)))
+feed.ga
+
+plotweb()
+
+bi.feed.cast<-edge.ph%>%
+  mutate(n_prop=n/cat_n)%>%
+  dcast(TREE_class~feed, value.var='sp', fill=0)%>%
+  mutate()
+bi.feed.cast
+
+low.n<-rowSums(bi.feed.cast%>%column_to_rownames('TREE_class'))
+#low.n[1:2]<-1
+low.n
+mat<-bi.feed.cast%>%column_to_rownames('TREE_class')
+plotweb(bi.feed.cast%>%column_to_rownames('TREE_class'),
+        low.abun=colSums(mat), high.abun=rowSums(mat))
+colSums(mat)
+
+library(igraph)
+
+mat/rowSums(mat)
+rowSums(mat)
+
+# first make herb feeding guilds
+100*(log(1+colSums(bi.feed.cast[,-1]))/24.23641)
+
+sum(log(1+colSums(bi.feed.cast[,-1]))) #327 total
+ 
+
+log(1+colSums(bi.feed.cast[,-1]))
+
+## scale plants relative to diversity on them
+## herb circle relative diversity
+## edge width is diversity, color proportional to host class cat
+
+
+# sam ebut proportion data?
+View(lep.info)
+
+## sclae tree trophic level to total number of caterpillars associated with each
+# or total diversty
+
+
+# herbivore aslo scaled to total number
+# vary sizes based on abundance
+
+
+## width of edge is the total number of caterpiilars
+# color within by whether or not they feed on one or both
+# so need new category within each ofproportion feeding one or either
+
+
+#######################################
+
+#### host-parasitoid ####
