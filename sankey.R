@@ -222,7 +222,7 @@ fg<-bi.feed.long%>%
   group_by(feed, HERB_sp_2019)%>%
   summarize(tree=length(unique(TREE_genus)))%>%
   group_by(feed)%>%
-  summarize(tree_sp=mean(tree), tree_se=se(tree)*.5, herb=length(unique(HERB_sp_2019)))
+  summarize(tree_sp=mean(tree), tree_se=se(tree), herb=length(unique(HERB_sp_2019)))
 
 ggplot(fg, aes(feed,tree_sp))+
   geom_bar(stat='identity', width=.6)+
