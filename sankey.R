@@ -218,10 +218,22 @@ feed.sp<-bi.feed.long%>%group_by(feed, HERB_sp_2019, TREE_class)%>%
   mutate(diet = case_when(is.na(Gymnosperm) ~ 'Angiosperm', is.na(Angiosperm) ~ 'Gymnosperm', !is.na(Angiosperm) & !is.na(Gymnosperm) ~ 'both'))
 feed.sp
 
-feed.sp%>%
-  group_by(diet)%>%
-  summarize(sp=length(unique(HERB_sp_2019))) ## 42 crossover species
+fg<-bi.feed.long%>%
+  group_by(feed, HERB_sp_2019)%>%
+  summarize(tree=length(unique(TREE_genus)))%>%
+  group_by(feed)%>%
+  summarize(tree_sp=mean(tree), tree_se=se(tree)*.5, herb=length(unique(HERB_sp_2019)))
 
+ggplot(fg, aes(feed,tree_sp))+
+  geom_bar(stat='identity', width=.6)+
+  geom_errorbar(aes(ymin=tree_sp-tree_se, ymax=tree_sp+tree_se), width=.2)+
+  coord_flip()+
+  scale_x_discrete(limits=c('leaf rollers','colonial shelter-builders', 'colonial defoliators','solitary defoliators','solitary shelter-builders','internal feeders - foliage','internal feeders - woody','lichen feeders','cone feeders'))
+ggsave('diet_feed.pdf', width=5, height=7)
+feed.sp%>%
+  group_by(diet, HERB_sp_2019)%>%
+  summarize(sp=length(unique(HERB_sp_2019))) ## 42 crossover species
+unique(fg$feed)
 # how many species of each diet category are in each feeding guild?
 str(feed.sp)
 feed.ga<-feed.sp%>%
@@ -284,3 +296,113 @@ View(lep.info)
 #######################################
 
 #### host-parasitoid ####
+
+## see how majoy groups split out - by order and by family
+## split out hyperparasitoids as well
+
+list.files('~/Dropbox/Projects/canada/para taxa')
+
+paras<-read_excel('~/Dropbox/Projects/canada/para taxa/parasitoid_master.xlsx')%>%
+  mutate(PARA_sp=case_when(is.na(PARA_species_2018) ~ PARA_species_dataset,
+                           TRUE ~ word(PARA_species_2018, 1,2)))%>%distinct(PARA_order, PARA_family, PARA_sp, ovipstrat, eggtype, primary, secondary)
+str(paras)
+length(unique(paras$PARA_sp)) #258
+
+
+## combine with tri-trophic matrix for host=para
+# qnd fg data
+# but also want to to know tree everything happened on A vs G is enough
+
+## HOST PARASITOPID MATRICES
+tri.hp.long<-tri.long%>%
+  left_join(tri.out%>%dplyr::select(ID, HERB_ID_SP, MOTH_host, MOTH_adult, MOTH_para, MOTH_para_hosts, PARA_rate))%>%
+  group_by(ID, HERB_ID_SP, TREE_genus, PARA_order, PARA_family, PARA_sp, PARA_sp_only, MOTH_host, MOTH_adult, MOTH_para, MOTH_para_hosts, PARA_rate)%>%
+  summarize(PARA_n_sp = sum(PARA_n))%>%
+  filter(!is.na(PARA_order))
+tri.hp.long%>%str
+
+## replace parasitoid names
+para.unk<-paras%>%filter(is.na(PARA_sp), !is.na(PARA_order))%>%
+  mutate(PARA_sp = case_when(PARA_family == 'Unknown' ~ paste0('UNK_',PARA_order),
+                             TRUE ~ paste0('UNK_',PARA_family)))
+para.unk
+
+unique(tri.hp.long$PARA_sp)
+tri<-tri.hp.long%>%ungroup()%>%dplyr::select(-PARA_order, -PARA_family)%>%
+  left_join(paras, by='PARA_sp')%>%
+  left_join(lep.info%>%distinct(HERB_ID_SP, HERB_family_2019, feed))%>%
+  mutate(PARA_order = case_when(PARA_sp %in% c('UNK_Diptera','Sarcophaga aldrichi','Sarcophaga sp.','UNK_Tachinidae','Ceromya ontario') ~ 'Diptera',
+                                PARA_sp %in% c('Amblymerus verditer','Tranosema rostrale','Ichneumon sp.','Habrocytus thridopterygis','Campoplegidea lobata','Copidosoma circulatum','Hypoptermalus inimicus','Dibrachys cavus','Campoplex sp.','Amblymerus tortricis','Amblymerus sp.','Tetrastichus minutus','UNK_Hymenoptera','Habrocytus phycidis','Aprosocetus esurus','Macrocentrus linearis','UNK_Braconidae','UNK_Encyrtidae','UNK_Ichneumonidae','UNK_Chalcidae','UNK_Pteromalidae','Eulophus sp.','Dirophanes maculicornis') ~ 'Hymenoptera',
+                                TRUE ~ PARA_order),
+         PARA_family = case_when(PARA_sp %in% c('Amblymerus sp.','Amblymerus verditer','Amblymerus tortricis','Habrocytus phycidis','Habrocytus thridopterygis','Hypoptermalus inimicus','Dibrachys cavus') ~ 'Pteromalidae',
+                                 PARA_sp %in% c('Eulophus sp.','Aprosocetus esurus','Tetrastichus minutus') ~ 'Eulophidae',
+                                 PARA_sp %in% c('Dirophanes maculicornis','Ichneumon sp.','Campoplex sp.','Campoplegidea lobata','Tranosema rostrale') ~ 'Ichneumonidae',
+                                 PARA_sp %in% c('UNK_Tachinidae','Ceromya ontario') ~ 'Tachinidae',
+                                 PARA_sp %in% c('Macrocentrus linearis') ~ 'Braconidae',
+                                 TRUE ~ PARA_family),
+         PARA_sp = case_when(PARA_sp == 'Amblymerus verditer' ~ 'Mesopolobus verditer',
+                             PARA_sp == 'Amblymerus tortricis' ~ 'Mesopolobus tortricis',
+                             PARA_sp == 'Habrocytus phycidis' ~ 'Pteromalus phycidis',
+                             PARA_sp == 'Tetrastichus minutus' ~ 'Aprostocetus minutus',
+                             PARA_sp == 'Habrocytus thridopterygis' ~ 'Pteromalus thyridopterigis',
+                             PARA_sp == 'Dibrachys cavus' ~ 'Dibrachys microgastri',
+                             PARA_sp == 'Campoplegidea lobata' ~ 'Dusona lobata', TRUE ~ PARA_sp))%>%
+  filter(!(PARA_sp %in% c('Dilophus obesulus','Pediobius?','FKA_Phorocera','Phrontosoma belfragei')), !(PARA_family %in% c('Phoridae','Cecidomyiidae','Sarcophagidae')))%>%
+  transform(TREE_genus = as.character(TREE_genus))%>%mutate(TREE_class = case_when(TREE_genus %in% c('Abies','Pinus','Picea','Larix','Tsuga','Thuja','Pseudotsuga','Juniperus') ~ 'Gymnosperm', TRUE ~ 'Angiosperm'))%>%
+  filter(PARA_sp != 'Sarcophaga aldrichi')%>%
+  mutate(feed = case_when(HERB_ID_SP == 'EPRE' ~ 'leaf rollers', TRUE ~ feed), 
+         group=case_when(PARA_family == 'Tachinidae' ~ 'Tachinidae',
+                     PARA_family %in% c('Ichneumonidae','Braconidae') ~ 'Ichneumonoidea',
+                     PARA_family %in% c('Pteromalidae','Chalcidae','Perilampidae','Eulophidae','Eurytomidae','Encyrtidae') ~ 'Chalcidoidea'))
+
+str(tri)
+## digest
+tri%>%
+  group_by(PARA_order, group)%>%
+  summarize(sp=length(unique(na.omit(PARA_sp_only))))
+# 74 Diptera, 158 Hymenoptera - 70 primary 150 primary - cleaned names only in 56 and 111
+# or with uncleaned = 76 and 197
+tri%>%filter(is.na(group))
+tri%>%
+  group_by(PARA_order, group)%>%
+  summarize(sp=length(unique(na.omit(PARA_sp_only))))
+# 55 Tachinids, 11 Chalcids, 99 Ichneumon, 
+
+tri.snakey<-tri%>%
+  filter(secondary == 'Y')%>%
+  group_by(TREE_class, feed, PARA_order, group)%>%
+  summarize(n=sum(MOTH_para), sp=length(unique(PARA_sp)), sp_only=length(unique(na.omit(PARA_sp_only))))%>%
+  filter(!is.na(group))
+# for parasitoids, width prepresents the number of parasitoids
+hyper<-tri%>%filter(secondary=='Y')
+
+
+tri%>%filter(ID %in% hyper$ID)%>%group_by(ID, TREE_class, group)%>%summarize(sp=length(unique(PARA_sp)))%>%dcast(ID+TREE_class~group)
+tri%>%filter(is.na(PARA_family))
+
+
+sr<-bi.mat%>%
+  melt()%>%filter(value>0)%>%mutate(value=1)%>%
+  group_by(Var1)%>%summarize(sp=sum(value))
+max(sr$sp)
+tri.hp.wide<-tri%>%
+  left_join(tri.out%>%dplyr::select(ID, HERB_ID_SP, MOTH_host, MOTH_adult, MOTH_para, MOTH_para_hosts, PARA_rate))%>%
+  group_by(HERB_ID_SP, PARA_order, PARA_family, PARA_sp_only)%>%
+  summarize(PARA_n = sum(PARA_n), HERB_n = sum(MOTH_para_hosts))%>%
+  filter(!is.na(PARA_sp_only), !is.na(HERB_ID_SP))
+
+
+#####
+
+# diet breadth of each feeding group
+
+bi.long%>%left_join(lep.info)
+
+
+
+
+
+
+
+
+  dcast(HERB_ID_SP~PARA_sp_only, value.var='PARA_n', fill=0)
